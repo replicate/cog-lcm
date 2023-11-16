@@ -1,14 +1,63 @@
-import cv2 as cv
+import asyncio
+import io
+import json
 import os
-import torch
-import datetime
-import tarfile
+from typing import Callable, AsyncIterator, Iterator, List, Optional
+
+import aiortc
+import cv2 as cv
 import numpy as np
-from typing import List, Optional
-from diffusers import ControlNetModel, DiffusionPipeline, AutoPipelineForImage2Image
-from latent_consistency_controlnet import LatentConsistencyModelPipeline_controlnet
+import torch
+from aiortc import RTCPeerConnection, RTCSessionDescription
 from cog import BasePredictor, Input, Path
+from diffusers import AutoPipelineForImage2Image, ControlNetModel, DiffusionPipeline
 from PIL import Image
+
+from latent_consistency_controlnet import LatentConsistencyModelPipeline_controlnet
+
+
+async def accept_offer(
+    offer: str, handler: Callable[[str | bytes], Iterator[str | bytes]]
+) -> AsyncIterator[str]:
+    print("handling offer")
+    params = json.loads(offer)
+
+    offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
+
+    pc = RTCPeerConnection()
+
+    print("Created for %s", offer)
+    done = asyncio.Event()
+
+    @pc.on("datachannel")
+    def on_datachannel(channel: aiortc.rtcdatachannel.RTCDataChannel) -> None:
+        print(type(channel))
+
+        @channel.on("message")
+        async def on_message(message) -> None:
+            print(message)
+            if isinstance(message, str) and message.startswith("ping"):
+                channel.send("pong" + message[4:])
+            else:
+                for result in handler(message):
+                    channel.send(result)
+
+    @pc.on("connectionstatechange")
+    async def on_connectionstatechange() -> None:
+        print("Connection state is %s", pc.connectionState)
+        if pc.connectionState == "failed":
+            await pc.close()
+            done.set()
+
+    # handle offer
+    await pc.setRemoteDescription(offer)
+
+    # send answer
+    answer = await pc.createAnswer()
+    await pc.setLocalDescription(answer)
+    yield json.dumps({"sdp": pc.localDescription.sdp, "type": pc.localDescription.type})
+    await done.wait()
+    yield "done"
 
 
 class Predictor(BasePredictor):
@@ -78,6 +127,10 @@ class Predictor(BasePredictor):
             image=[Image.new("RGB", (768, 768))],
             control_image=[Image.new("RGB", (768, 768))],
         )
+        try:
+            self.loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self.loop = asyncio.new_event_loop()
 
     def control_image(self, image, canny_low_threshold, canny_high_threshold):
         image = np.array(image)
@@ -137,7 +190,7 @@ class Predictor(BasePredictor):
         image, control_image = self.resize_images([image, control_image], width, height)
         return width, height, control_image, image
 
-    def predict(
+    def _predict(
         self,
         prompt: str = Input(
             description="For multiple prompts, enter each on a new line.",
@@ -222,10 +275,10 @@ class Predictor(BasePredictor):
             le=255,
             default=200,
         ),
-        archive_outputs: bool = Input(
-            description="Option to archive the output images",
-            default=False,
-        ),
+        # archive_outputs: bool = Input(
+        #     description="Option to archive the output images",
+        #     default=False,
+        # ),
         disable_safety_checker: bool = Input(
             description="Disable safety checker for generated images. This feature is only available through the API",
             default=False,
@@ -287,7 +340,10 @@ class Predictor(BasePredictor):
 
         mode = "controlnet" if control_image else "img2img" if image else "txt2img"
         print(f"{mode} mode")
-        pipe = getattr(self, f"{mode}_pipe" if not disable_safety_checker else f"{mode}_pipe_unsafe")
+        pipe = getattr(
+            self,
+            f"{mode}_pipe" if not disable_safety_checker else f"{mode}_pipe_unsafe",
+        )
 
         common_args = {
             "width": width,
@@ -300,30 +356,50 @@ class Predictor(BasePredictor):
             "output_type": "pil",
         }
         result = pipe(**common_args, **kwargs, generator=torch.manual_seed(seed)).images
+        return result
+        # if archive_outputs:
+        #     archive_start_time = datetime.datetime.now()
+        #     print(f"Archiving images started at {archive_start_time}")
 
-        if archive_outputs:
-            archive_start_time = datetime.datetime.now()
-            print(f"Archiving images started at {archive_start_time}")
+        #     tar_path = "/tmp/output_images.tar"
+        #     with tarfile.open(tar_path, "w") as tar:
+        #         for i, sample in enumerate(result):
+        #             output_path = f"/tmp/out-{i}.png"
+        #             sample.save(output_path)
+        #             tar.add(output_path, f"out-{i}.png")
 
-            tar_path = "/tmp/output_images.tar"
-            with tarfile.open(tar_path, "w") as tar:
-                for i, sample in enumerate(result):
-                    output_path = f"/tmp/out-{i}.png"
-                    sample.save(output_path)
-                    tar.add(output_path, f"out-{i}.png")
+        #     return Path(tar_path)
 
-            return Path(tar_path)
+        # # If not archiving, or there is an error in archiving, return the paths of individual images.
+        # output_paths = []
+        # for i, sample in enumerate(result):
+        #     output_path = f"/tmp/out-{i}.jpg"
+        #     sample.save(output_path)
+        #     output_paths.append(Path(output_path))
 
-        # If not archiving, or there is an error in archiving, return the paths of individual images.
-        output_paths = []
-        for i, sample in enumerate(result):
-            output_path = f"/tmp/out-{i}.jpg"
-            sample.save(output_path)
-            output_paths.append(Path(output_path))
+        # if canny_image:
+        #     canny_image_path = "/tmp/canny-image.jpg"
+        #     canny_image.save(canny_image_path)
+        #     output_paths.append(Path(canny_image_path))
 
-        if canny_image:
-            canny_image_path = "/tmp/canny-image.jpg"
-            canny_image.save(canny_image_path)
-            output_paths.append(Path(canny_image_path))
+        # return output_paths
 
-        return output_paths
+    def predict(
+        self,
+        offer: str = Input("webRTC offer"),
+    ) -> Iterator[str]:
+        def handler(message: str) -> Iterator[bytes]:
+            if message[0] != "{":
+                print("received invalid message", message)
+                return
+            args = json.loads(message)
+            results = self._predict(**args)
+            for result in results:
+                buf = io.BytesIO()
+                result.save(buf, format="webp")
+                buf.seek(0)
+                yield buf.read()
+
+        thing = accept_offer(offer, handler)
+        yield self.loop.run_until_complete(thing.__anext__())
+        self.loop.run_until_complete(thing.__anext__())
