@@ -22,7 +22,10 @@ from latent_consistency_controlnet import LatentConsistencyModelPipeline_control
 
 
 async def accept_offer(
-    offer: str, handler: Callable[[str | bytes], Iterator[str | bytes]], ice: bool
+    offer: str,
+    handler: Callable[[str | bytes], Iterator[str | bytes]],
+    stun: bool,
+    turn: bool,
 ) -> tuple[str, asyncio.Event]:
     print("handling offer")
     params = json.loads(offer)
@@ -30,10 +33,34 @@ async def accept_offer(
     offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
 
     pc = RTCPeerConnection()
-    ice_servers = [
-        RTCIceServer(urls=["stun:stun.l.google.com:19302"]),
-        RTCIceServer(urls=["turn:turn.anyfirewall.com:443"]),
-    ]
+    if turn:
+        ice_servers = [
+            RTCIceServer(urls="stun:stun.relay.metered.ca:80"),
+            RTCIceServer(
+                urls="turn:a.relay.metered.ca:80",
+                username="d0d9c8df0b9e209b5f81f70d",
+                credential="32ANR/GokUdBpWrp",
+            ),
+            RTCIceServer(
+                urls="turn:a.relay.metered.ca:80?transport=tcp",
+                username="d0d9c8df0b9e209b5f81f70d",
+                credential="32ANR/GokUdBpWrp",
+            ),
+            RTCIceServer(
+                urls="turn:a.relay.metered.ca:443",
+                username="d0d9c8df0b9e209b5f81f70d",
+                credential="32ANR/GokUdBpWrp",
+            ),
+            RTCIceServer(
+                urls="turn:a.relay.metered.ca:443?transport=tcp",
+                username="d0d9c8df0b9e209b5f81f70d",
+                credential="32ANR/GokUdBpWrp",
+            ),
+        ]
+    elif stun:
+        ice_servers = [RTCIceServer(urls=["stun:stun.l.google.com:19302"])]
+    else:
+        ice_servers = []
 
     pc = RTCPeerConnection(configuration=RTCConfiguration(ice_servers if ice else []))
 
@@ -403,7 +430,8 @@ class Predictor(BasePredictor):
             description="send as data url rather than bytes", default=False
         ),
         format: str = Input(default="webp"),
-        use_stun: str = Input(description="use STUN/TURN ICE servers", default=True)
+        stun: bool = Input(description="use STUN ICE servers", default=True),
+        turn: bool = Input(description="use TURN ICE servers", default=True),
     ) -> Iterator[str]:
         def handler(message: bytes | str) -> Iterator[bytes | str]:
             if message[0] != "{":
@@ -420,7 +448,9 @@ class Predictor(BasePredictor):
                     buf.seek(0)
                     yield buf.read()
 
-        offer, done = self.loop.run_until_complete(accept_offer(offer, handler, use_stun))
+        offer, done = self.loop.run_until_complete(
+            accept_offer(offer, handler, stun, turn)
+        )
         yield offer
         self.loop.run_until_complete(done.wait())
         yield "disconnected"
