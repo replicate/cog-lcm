@@ -1,8 +1,9 @@
 import asyncio
+import base64
 import io
 import json
 import os
-from typing import Callable, AsyncIterator, Iterator, List, Optional
+from typing import Callable, Iterator, List, Optional
 
 import aiortc
 import cv2 as cv
@@ -12,13 +13,12 @@ from aiortc import RTCPeerConnection, RTCSessionDescription
 from cog import BasePredictor, Input, Path
 from diffusers import AutoPipelineForImage2Image, ControlNetModel, DiffusionPipeline
 from PIL import Image
-
 from latent_consistency_controlnet import LatentConsistencyModelPipeline_controlnet
 
 
 async def accept_offer(
     offer: str, handler: Callable[[str | bytes], Iterator[str | bytes]]
-) -> AsyncIterator[str]:
+) -> tuple[str, asyncio.Event]:
     print("handling offer")
     params = json.loads(offer)
 
@@ -55,9 +55,10 @@ async def accept_offer(
     # send answer
     answer = await pc.createAnswer()
     await pc.setLocalDescription(answer)
-    yield json.dumps({"sdp": pc.localDescription.sdp, "type": pc.localDescription.type})
-    await done.wait()
-    yield "done"
+    data = json.dumps(
+        {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}
+    )
+    return data, done
 
 
 class Predictor(BasePredictor):
@@ -386,20 +387,28 @@ class Predictor(BasePredictor):
 
     def predict(
         self,
-        offer: str = Input("webRTC offer"),
+        offer: str = Input(description="webRTC offer"),
+        datauri: bool = Input(
+            description="send as data url rather than bytes", default=False
+        ),
+        format: str = Input(default="webp"),
     ) -> Iterator[str]:
-        def handler(message: str) -> Iterator[bytes]:
+        def handler(message: bytes | str) -> Iterator[bytes | str]:
             if message[0] != "{":
                 print("received invalid message", message)
                 return
-            args = json.loads(message)
+            args = json.loads(message) # works for bytes or str
             results = self._predict(**args)
             for result in results:
                 buf = io.BytesIO()
-                result.save(buf, format="webp")
-                buf.seek(0)
-                yield buf.read()
+                result.save(buf, format=format)
+                if datauri:
+                    yield f"data:image/{format};base64,{base64.b64encode(buf.getbuffer()).decode()}"
+                else:
+                    buf.seek(0)
+                    yield buf.read()
 
-        thing = accept_offer(offer, handler)
-        yield self.loop.run_until_complete(thing.__anext__())
-        self.loop.run_until_complete(thing.__anext__())
+        offer, done = self.loop.run_until_complete(accept_offer(offer, handler))
+        yield offer
+        self.loop.run_until_complete(done.wait())
+        yield "disconnected"

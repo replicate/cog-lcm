@@ -15,4 +15,6 @@ build:
     - "Pillow==10.1.0"
     - "transformers==4.34.1"
     - "opencv-python-headless==4.8.1.78"
+    - "aiortc"
+    - "aiohttp[speedups]"
 predict: "predict.py:Predictor"
