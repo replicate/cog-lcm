@@ -9,7 +9,12 @@ import aiortc
 import cv2 as cv
 import numpy as np
 import torch
-from aiortc import RTCPeerConnection, RTCSessionDescription
+from aiortc import (
+    RTCPeerConnection,
+    RTCSessionDescription,
+    RTCConfiguration,
+    RTCIceServer,
+)
 from cog import BasePredictor, Input, Path
 from diffusers import AutoPipelineForImage2Image, ControlNetModel, DiffusionPipeline
 from PIL import Image
@@ -17,7 +22,7 @@ from latent_consistency_controlnet import LatentConsistencyModelPipeline_control
 
 
 async def accept_offer(
-    offer: str, handler: Callable[[str | bytes], Iterator[str | bytes]]
+    offer: str, handler: Callable[[str | bytes], Iterator[str | bytes]], ice: bool
 ) -> tuple[str, asyncio.Event]:
     print("handling offer")
     params = json.loads(offer)
@@ -25,6 +30,12 @@ async def accept_offer(
     offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
 
     pc = RTCPeerConnection()
+    ice_servers = [
+        RTCIceServer(urls=["stun:stun.l.google.com:19302"]),
+        RTCIceServer(urls=["turn:turn.anyfirewall.com:443"]),
+    ]
+
+    pc = RTCPeerConnection(configuration=RTCConfiguration(ice_servers if ice else []))
 
     print("Created for %s", offer)
     done = asyncio.Event()
@@ -392,12 +403,13 @@ class Predictor(BasePredictor):
             description="send as data url rather than bytes", default=False
         ),
         format: str = Input(default="webp"),
+        use_stun: str = Input(description="use STUN/TURN ICE servers", default=True)
     ) -> Iterator[str]:
         def handler(message: bytes | str) -> Iterator[bytes | str]:
             if message[0] != "{":
                 print("received invalid message", message)
                 return
-            args = json.loads(message) # works for bytes or str
+            args = json.loads(message)  # works for bytes or str
             results = self._predict(**args)
             for result in results:
                 buf = io.BytesIO()
@@ -408,7 +420,7 @@ class Predictor(BasePredictor):
                     buf.seek(0)
                     yield buf.read()
 
-        offer, done = self.loop.run_until_complete(accept_offer(offer, handler))
+        offer, done = self.loop.run_until_complete(accept_offer(offer, handler, use_stun))
         yield offer
         self.loop.run_until_complete(done.wait())
         yield "disconnected"
