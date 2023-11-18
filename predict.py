@@ -24,47 +24,19 @@ from latent_consistency_controlnet import LatentConsistencyModelPipeline_control
 async def accept_offer(
     offer: str,
     handler: Callable[[str | bytes], Iterator[str | bytes]],
-    stun: bool,
-    turn: bool,
+    ice_servers: str,
 ) -> tuple[str, asyncio.Event]:
     print("handling offer")
     params = json.loads(offer)
 
     offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
 
-    pc = RTCPeerConnection()
-    if turn:
-        ice_servers = [
-            RTCIceServer(urls="stun:stun.relay.metered.ca:80"),
-            RTCIceServer(
-                urls="turn:a.relay.metered.ca:80",
-                username="d0d9c8df0b9e209b5f81f70d",
-                credential="32ANR/GokUdBpWrp",
-            ),
-            RTCIceServer(
-                urls="turn:a.relay.metered.ca:80?transport=tcp",
-                username="d0d9c8df0b9e209b5f81f70d",
-                credential="32ANR/GokUdBpWrp",
-            ),
-            RTCIceServer(
-                urls="turn:a.relay.metered.ca:443",
-                username="d0d9c8df0b9e209b5f81f70d",
-                credential="32ANR/GokUdBpWrp",
-            ),
-            RTCIceServer(
-                urls="turn:a.relay.metered.ca:443?transport=tcp",
-                username="d0d9c8df0b9e209b5f81f70d",
-                credential="32ANR/GokUdBpWrp",
-            ),
-        ]
-    elif stun:
-        ice_servers = [RTCIceServer(urls=["stun:stun.l.google.com:19302"])]
-    else:
-        ice_servers = []
+    print("creating for", offer)
+    config = RTCConfiguration([RTCIceServer(**a) for a in json.loads(ice_servers)])
+    print("configured for", ice_servers)
+    pc = RTCPeerConnection(configuration=config)
+    print("made peerconnection", pc)
 
-    pc = RTCPeerConnection(configuration=RTCConfiguration(ice_servers if ice else []))
-
-    print("Created for %s", offer)
     done = asyncio.Event()
 
     @pc.on("datachannel")
@@ -89,10 +61,13 @@ async def accept_offer(
 
     # handle offer
     await pc.setRemoteDescription(offer)
+    print("set remote description")
 
     # send answer
     answer = await pc.createAnswer()
+    print("created answer", answer)
     await pc.setLocalDescription(answer)
+    print("set local description")
     data = json.dumps(
         {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}
     )
@@ -228,6 +203,42 @@ class Predictor(BasePredictor):
 
         image, control_image = self.resize_images([image, control_image], width, height)
         return width, height, control_image, image
+
+    def predict(
+        self,
+        offer: str = Input(description="webRTC offer"),
+        datauri: bool = Input(
+            description="send as data url rather than bytes", default=False
+        ),
+        format: str = Input(default="webp"),
+        ice_servers: str = Input(
+            description="ICE servers to use",
+            default='[{"urls":"stun:stun.l.google.com:19302"}]',
+        ),
+    ) -> Iterator[str]:
+        def handler(message: bytes | str) -> Iterator[bytes | str]:
+            if message[0] != "{":
+                print("received invalid message", message)
+                return
+            args = json.loads(message)  # works for bytes or str
+            results = self._predict(**args)
+            for result in results:
+                buf = io.BytesIO()
+                result.save(buf, format=format)
+                if datauri:
+                    yield f"data:image/{format};base64,{base64.b64encode(buf.getbuffer()).decode()}"
+                else:
+                    buf.seek(0)
+                    yield buf.read()
+
+        offer, done = self.loop.run_until_complete(
+            accept_offer(offer, handler, ice_servers)
+        )
+        yield offer
+        self.loop.run_until_complete(done.wait())
+        yield "disconnected"
+
+    Input = lambda default=None, **_: default
 
     def _predict(
         self,
@@ -423,34 +434,4 @@ class Predictor(BasePredictor):
 
         # return output_paths
 
-    def predict(
-        self,
-        offer: str = Input(description="webRTC offer"),
-        datauri: bool = Input(
-            description="send as data url rather than bytes", default=False
-        ),
-        format: str = Input(default="webp"),
-        stun: bool = Input(description="use STUN ICE servers", default=True),
-        turn: bool = Input(description="use TURN ICE servers", default=True),
-    ) -> Iterator[str]:
-        def handler(message: bytes | str) -> Iterator[bytes | str]:
-            if message[0] != "{":
-                print("received invalid message", message)
-                return
-            args = json.loads(message)  # works for bytes or str
-            results = self._predict(**args)
-            for result in results:
-                buf = io.BytesIO()
-                result.save(buf, format=format)
-                if datauri:
-                    yield f"data:image/{format};base64,{base64.b64encode(buf.getbuffer()).decode()}"
-                else:
-                    buf.seek(0)
-                    yield buf.read()
 
-        offer, done = self.loop.run_until_complete(
-            accept_offer(offer, handler, stun, turn)
-        )
-        yield offer
-        self.loop.run_until_complete(done.wait())
-        yield "disconnected"
