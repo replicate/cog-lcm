@@ -11,7 +11,7 @@ import logging
 
 logging.getLogger().setLevel("DEBUG")
 html = open("index.html").read()
-
+#servers = '[{"urls": "turn:216.153.60.62:3478", "credential": "fakecred", "username": "fakename"}]'
 
 async def index(req: web.Request) -> web.Response:
     return web.Response(body=html, content_type="text/html")
@@ -19,8 +19,7 @@ async def index(req: web.Request) -> web.Response:
 
 async def js(req: web.Request) -> web.Response:
     return web.Response(
-        # body=open("client.js").read(),
-        body=open("gpt_client.js").read(),
+        body=open("client.js").read(), #.replace("/*SERVERS*/", f"config.iceServers = {servers}"),
         content_type="application/javascript",
         headers={"Cache-Control": "No-Cache"},
     )
@@ -30,11 +29,14 @@ async def js(req: web.Request) -> web.Response:
 async def offer(request: web.Request) -> web.Response:
     print("!!!")
     print("handling offer")
-    offer_data = await request.text()
+    data = await request.json()
+    offer_data = data["offer"]
+    servers = data["servers"]
+
     st = time.time()
     output = await replicate.async_run(
-        "technillogue/lcm-webrtc:19d4c41ed444334b95193de6b1bbfe43f7579e09523070272f5e44d892ca8bcc",
-        input={"offer": offer_data, "datauri": True, "turn": False},
+        "technillogue/lcm-webrtc:09a4ea6254ef8beb4944c2c116a16d4a0ed31906ef9a4e7120c2bc42c4c46afb",
+        input={"offer": offer_data, "datauri": True, "ice_servers": servers},
     )
     print(f"running prediction took {time.time()-st:.3f}")
     st = time.time()

@@ -11,10 +11,14 @@ let dataChannel = null;
 let dataChannelOpen = false;
 let pc = null;
 let timeStart = null;
+let servers = [];
 
 // Cached DOM elements
 const promptInput = document.getElementById("prompt");
 const seedInput = document.getElementById("seed");
+const latencyField = document.getElementById("latency");
+const genTimeField = document.getElementById("gen-time");
+const rtcPingField = document.getElementById("rtc-ping");
 const dataChannelLog = document.getElementById("data-channel");
 const iceConnectionLog = document.getElementById("ice-connection-state");
 const iceGatheringLog = document.getElementById("ice-gathering-state");
@@ -34,7 +38,7 @@ async function getPrompt() {
         lastSeed = newSeed;
         lastSent = Date.now();
         console.time("generation");
-        return JSON.stringify({ prompt: newPrompt, seed: newSeed });
+        return JSON.stringify({ prompt: newPrompt, seed: newSeed, id: lastSent, height: 512, width: 512});
       }
     }
     await wait(100);
@@ -44,7 +48,12 @@ async function getPrompt() {
 // Function to handle incoming image data
 function handleImage(data) {
   waiting = false;
-  const parsed = { image: data };
+  console.log("handling image!");
+  const parsed = JSON.parse(data);
+  latencyField.textContent = `generation latency: ${Math.round(
+    Date.now() - parsed.id,
+  )}ms`;
+  genTimeField.textContent = `server generation time: ${parsed.gen_time}ms`;
   const topImage = document.getElementById("imoge");
   const bottomImage = document.getElementById("imoge2");
   const newOpacity = topImage.style.opacity === "1" ? "0" : "1";
@@ -99,7 +108,7 @@ function make_elapsed() {
 }
 
 // Peer connection setup
-function createPeerConnection() {
+async function createPeerConnection() {
   const config = {
     sdpSemantics: "unified-plan",
   };
@@ -111,18 +120,18 @@ function createPeerConnection() {
   if (document.getElementById("use-stun").checked) {
     config.iceServers = [
       { urls: "stun:stun.relay.metered.ca:80" },
-      {
-        urls: "turn:a.relay.metered.ca:80",
-        username: "d0d9c8df0b9e209b5f81f70d",
-        credential: "32ANR/GokUdBpWrp",
-      },
+      // {
+      //   urls: "turn:a.relay.metered.ca:80",
+      //   username: "d0d9c8df0b9e209b5f81f70d",
+      //   credential: "32ANR/GokUdBpWrp",
+      // },
+      // {
+      //   urls: "turn:a.relay.metered.ca:443",
+      //   username: "d0d9c8df0b9e209b5f81f70d",
+      //   credential: "32ANR/GokUdBpWrp",
+      // },
       {
         urls: "turn:a.relay.metered.ca:80?transport=tcp",
-        username: "d0d9c8df0b9e209b5f81f70d",
-        credential: "32ANR/GokUdBpWrp",
-      },
-      {
-        urls: "turn:a.relay.metered.ca:443",
         username: "d0d9c8df0b9e209b5f81f70d",
         credential: "32ANR/GokUdBpWrp",
       },
@@ -131,7 +140,24 @@ function createPeerConnection() {
         username: "d0d9c8df0b9e209b5f81f70d",
         credential: "32ANR/GokUdBpWrp",
       },
+      // {
+      //   urls: "turn:216.153.63.64:3478?transport=tcp",
+      //   credential: "fakecred",
+      //   username: "fakeuser",
+      // },
+      // { urls: "stun:216.153.63.64:3478" },
     ];
+    /*SERVERS*/
+    /*
+    const response = await fetch(
+      "https://sylvie-test.metered.live/api/v1/turn/credentials?apiKey=fb2f54b77cc9ed3fd8f5ab1152aa37c6a43d",
+    );
+
+    // Saving the response in the iceServers array
+    config.iceServers = await response.json();
+    */
+    servers = config.iceServers;
+    console.log(servers);
   }
 
   pc = new RTCPeerConnection(config);
@@ -198,10 +224,14 @@ async function negotiate() {
     const offerSDP = pc.localDescription;
     document.getElementById("offer-sdp").textContent = offerSDP.sdp;
     console.time("fetch offer");
+    const offer_data = JSON.stringify({
+      sdp: offerSDP.sdp,
+      type: offerSDP.type,
+    });
     const response = await fetch("/offer", {
       body: JSON.stringify({
-        sdp: offerSDP.sdp,
-        type: offerSDP.type,
+        offer: offer_data,
+        servers: JSON.stringify(servers),
       }),
       headers: {
         "Content-Type": "application/json",
@@ -223,7 +253,7 @@ async function negotiate() {
 
 // Start the WebRTC connection
 async function start() {
-  pc = createPeerConnection();
+  pc = await createPeerConnection();
   console.time("create data channel");
   dataChannel = pc.createDataChannel("chat", { ordered: true });
   console.timeEnd("create data channel");
@@ -249,8 +279,8 @@ async function start() {
     if (evt.data.startsWith("pong")) {
       const elapsedMs = timeStamp() - parseInt(evt.data.slice(5), 10);
       dataChannelLog.textContent += ` RTT ${elapsedMs} ms\n`;
-    }
-    if (evt.data.startsWith("{")) {
+      rtcPingField.textContent = `webRTC roundtrip ping: ${elapsedMs}ms`;
+    } else {
       handleImage(evt.data);
     }
   };
