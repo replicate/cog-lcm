@@ -3,6 +3,7 @@ import base64
 import io
 import json
 import os
+import time
 from typing import Callable, Iterator, List, Optional
 
 import aiortc
@@ -221,12 +222,16 @@ class Predictor(BasePredictor):
                 print("received invalid message", message)
                 return
             args = json.loads(message)  # works for bytes or str
+            st = time.time()
+            id = args.pop("id", 0)
             results = self._predict(**args)
             for result in results:
                 buf = io.BytesIO()
                 result.save(buf, format=format)
                 if datauri:
-                    yield f"data:image/{format};base64,{base64.b64encode(buf.getbuffer()).decode()}"
+                    img = f"data:image/{format};base64,{base64.b64encode(buf.getbuffer()).decode()}"
+                    resp = {"gen_time": round((time.time() - st) * 1000), "id": id, "image": img}
+                    yield json.dumps(resp)
                 else:
                     buf.seek(0)
                     yield buf.read()
@@ -238,6 +243,7 @@ class Predictor(BasePredictor):
         self.loop.run_until_complete(done.wait())
         yield "disconnected"
 
+    # for whatever reason _predict doesn't get un-pydantic'd 
     Input = lambda default=None, **_: default
 
     def _predict(
@@ -433,5 +439,3 @@ class Predictor(BasePredictor):
         #     output_paths.append(Path(canny_image_path))
 
         # return output_paths
-
-
