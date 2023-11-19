@@ -22,6 +22,23 @@ from PIL import Image
 from latent_consistency_controlnet import LatentConsistencyModelPipeline_controlnet
 
 
+class Shutdown(asyncio.Event):
+    def __init__(self, timeout: int = 30) -> None:
+        self.deadline = time.monotonic() + timeout
+        self.timeout = timeout
+        self.task = asyncio.create_task(self.exit())
+        super().__init__()
+
+    def reset(self) -> None:
+        self.deadline = time.monotonic() + timeout
+
+    async def exit(self) -> None:
+        while not self.is_set():
+            await asyncio.sleep(self.deadline - time.monotonic())
+            if self.deadline < time.monotonic():
+                print("ping deadline exceeded")
+                self.set()
+
 async def accept_offer(
     offer: str,
     handler: Callable[[str | bytes], Iterator[str | bytes]],
@@ -38,7 +55,7 @@ async def accept_offer(
     pc = RTCPeerConnection(configuration=config)
     print("made peerconnection", pc)
 
-    done = asyncio.Event()
+    done = Shutdown()
 
     @pc.on("datachannel")
     def on_datachannel(channel: aiortc.rtcdatachannel.RTCDataChannel) -> None:
@@ -48,7 +65,8 @@ async def accept_offer(
         async def on_message(message) -> None:
             print(message)
             if isinstance(message, str) and message.startswith("ping"):
-                channel.send("pong" + message[4:])
+                channel.send(f"pong{message[4:]} {time.time()}")
+                done.reset()
             else:
                 for result in handler(message):
                     channel.send(result)
