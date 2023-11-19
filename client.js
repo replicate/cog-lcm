@@ -87,6 +87,7 @@ function sendPrompt() {
         console.log("No connections open, retrying");
       }
     };
+    trySend();
     interval = setInterval(trySend, 1000);
   });
 }
