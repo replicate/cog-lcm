@@ -30,7 +30,7 @@ class Shutdown(asyncio.Event):
         super().__init__()
 
     def reset(self) -> None:
-        self.deadline = time.monotonic() + timeout
+        self.deadline = time.monotonic() + self.timeout
 
     async def exit(self) -> None:
         while not self.is_set():
@@ -38,6 +38,7 @@ class Shutdown(asyncio.Event):
             if self.deadline < time.monotonic():
                 print("ping deadline exceeded")
                 self.set()
+
 
 async def accept_offer(
     offer: str,
@@ -65,7 +66,7 @@ async def accept_offer(
         async def on_message(message) -> None:
             print(message)
             if isinstance(message, str) and message.startswith("ping"):
-                channel.send(f"pong{message[4:]} {time.time()}")
+                channel.send(f"pong{message[4:]} {round(time.time() * 1000)}")
                 done.reset()
             else:
                 for result in handler(message):
@@ -243,16 +244,16 @@ class Predictor(BasePredictor):
             start = time.time()
             id = args.pop("id", 0)
             results = self._predict(**args)
-            end = time.time()
             for result in results:
                 buf = io.BytesIO()
                 result.save(buf, format=format)
+                end = time.time()
                 if datauri:
                     img = f"data:image/{format};base64,{base64.b64encode(buf.getbuffer()).decode()}"
                     resp = {
-                        "gen_time": round(end - start) * 1000),
-                        "start": round(start*1000),
-                        "end": round(end*1000),
+                        "gen_time": round((end - start) * 1000),
+                        "start": round(start * 1000),
+                        "end": round(end * 1000),
                         "id": id,
                         "image": img,
                     }
