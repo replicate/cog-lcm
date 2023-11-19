@@ -16,9 +16,12 @@ let servers = [];
 // Cached DOM elements
 const promptInput = document.getElementById("prompt");
 const seedInput = document.getElementById("seed");
+
 const latencyField = document.getElementById("latency");
 const genTimeField = document.getElementById("gen-time");
 const rtcPingField = document.getElementById("rtc-ping");
+const estimatedClockDriftField = document.getElementById("estimated-clock-drift");
+const generationStatusLog = document.getElementById("generation-state");
 const dataChannelLog = document.getElementById("data-channel");
 const iceConnectionLog = document.getElementById("ice-connection-state");
 const iceGatheringLog = document.getElementById("ice-gathering-state");
@@ -26,6 +29,7 @@ const signalingLog = document.getElementById("signaling-state");
 
 // Utility function to wait for a specified amount of time
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+let generation_elapsed = null
 
 // Function to get prompt data
 async function getPrompt() {
@@ -54,6 +58,9 @@ function handleImage(data) {
     Date.now() - parsed.id,
   )}ms`;
   genTimeField.textContent = `server generation time: ${parsed.gen_time}ms`;
+  generationStatusLog.textContent += ` -(${generation_elapsed(parsed.start)})-> server_start`
+  generationStatusLog.textContent += ` -(${generation_elapsed(parsed.end)})-> server_end`
+  generationStatusLog.textContent += ` -(${generation_elapsed()})-> received`
   const topImage = document.getElementById("imoge");
   const bottomImage = document.getElementById("imoge2");
   const newOpacity = topImage.style.opacity === "1" ? "0" : "1";
@@ -73,6 +80,8 @@ function sendPrompt() {
     const trySend = () => {
       if (dataChannel && dataChannelOpen) {
         dataChannelLog.textContent += "> " + prompt + "\n";
+        generation_elapsed = make_elapsed()
+        generationStatusLog.textContent = "sent"
         dataChannel.send(prompt);
         sending = false;
       } else {
@@ -99,8 +108,8 @@ function timeStamp() {
 }
 function make_elapsed() {
   let last = Date.now();
-  return () => {
-    const now = Date.now();
+  return (set_to = null) => {
+    const now = set_to == null ? Date.now() : set_to;
     const elapsed = `${Math.round((now - last) / 100) / 10}s`;
     last = now;
     return elapsed;
@@ -277,7 +286,10 @@ async function start() {
   dataChannel.onmessage = (evt) => {
     dataChannelLog.textContent += `< ${evt.data}\n`;
     if (evt.data.startsWith("pong")) {
-      const elapsedMs = timeStamp() - parseInt(evt.data.slice(5), 10);
+      let [our_time, their_time] = evt.data.slice(5).split
+      const elapsedMs = timeStamp() - parseInt(our_time, 10);
+      const estimated_server_time = parseInt(their_time, 10) + elapsedMs / 2;
+      estimatedClockDriftField = `estimated clock drift from server: ${Math.round(Date.now() - estimated_server_time)}ms`
       dataChannelLog.textContent += ` RTT ${elapsedMs} ms\n`;
       rtcPingField.textContent = `webRTC roundtrip ping: ${elapsedMs}ms`;
     } else {

@@ -240,15 +240,22 @@ class Predictor(BasePredictor):
                 print("received invalid message", message)
                 return
             args = json.loads(message)  # works for bytes or str
-            st = time.time()
+            start = time.time()
             id = args.pop("id", 0)
             results = self._predict(**args)
+            end = time.time()
             for result in results:
                 buf = io.BytesIO()
                 result.save(buf, format=format)
                 if datauri:
                     img = f"data:image/{format};base64,{base64.b64encode(buf.getbuffer()).decode()}"
-                    resp = {"gen_time": round((time.time() - st) * 1000), "id": id, "image": img}
+                    resp = {
+                        "gen_time": round(end - start) * 1000),
+                        "start": round(start*1000),
+                        "end": round(end*1000),
+                        "id": id,
+                        "image": img,
+                    }
                     yield json.dumps(resp)
                 else:
                     buf.seek(0)
@@ -261,7 +268,7 @@ class Predictor(BasePredictor):
         self.loop.run_until_complete(done.wait())
         yield "disconnected"
 
-    # for whatever reason _predict doesn't get un-pydantic'd 
+    # for whatever reason _predict doesn't get un-pydantic'd
     Input = lambda default=None, **_: default
 
     def _predict(
