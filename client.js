@@ -4,8 +4,6 @@ console.time("loading");
 // Initialize global state
 let lastPrompt = null;
 let lastSeed = null;
-let lastSent = null;
-let sending = false;
 let waiting = false;
 let dataChannel = null;
 let dataChannelOpen = false;
@@ -40,9 +38,8 @@ async function getPrompt() {
       if (newPrompt !== lastPrompt || newSeed !== lastSeed) {
         lastPrompt = newPrompt;
         lastSeed = newSeed;
-        lastSent = Date.now();
         console.time("generation");
-        return JSON.stringify({ prompt: newPrompt, seed: newSeed, id: lastSent, height: 512, width: 512});
+        return { prompt: newPrompt, seed: newSeed, height: 512, width: 512};
       }
     }
     await wait(100);
@@ -77,23 +74,20 @@ function sendPrompt() {
   }
   waiting = true;
   getPrompt().then((prompt) => {
+    let interval;
     const trySend = () => {
       if (dataChannel && dataChannelOpen) {
         dataChannelLog.textContent += "> " + prompt + "\n";
         generation_elapsed = make_elapsed(true)
+        prompt.id = Date.now()
         generationStatusLog.textContent = "sent"
-        dataChannel.send(prompt);
-        sending = false;
+        dataChannel.send(JSON.stringify(prompt));
+        clearInterval(interval);
       } else {
         console.log("No connections open, retrying");
       }
     };
-    const interval = setInterval(() => {
-      if (!sending) {
-        trySend();
-        clearInterval(interval);
-      }
-    }, 1000);
+    interval = setInterval(trySend, 1000);
   });
 }
 
