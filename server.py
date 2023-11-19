@@ -35,7 +35,7 @@ async def offer(request: web.Request) -> web.Response:
 
     st = time.time()
     output = await replicate.async_run(
-        "technillogue/lcm-webrtc:09a4ea6254ef8beb4944c2c116a16d4a0ed31906ef9a4e7120c2bc42c4c46afb",
+        "technillogue/lcm-webrtc:d488a31186c9e6e2e92c89a7d21a7d0553e7e637bc8af4ea6747c7a644aa94ae",
         input={"offer": offer_data, "datauri": True, "ice_servers": servers},
     )
     print(f"running prediction took {time.time()-st:.3f}")

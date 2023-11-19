@@ -8,11 +8,12 @@
     button {
         padding: 8px 16px;
     }
-    img { transition:opacity 1s linear; position: absolute; top:5%; left: 25%; width:512px;height: 512px}
+    img { transition:opacity 1s linear; position: absolute; top:5%; left: 40%; width:512px;height: 512px}
     pre {
         overflow-x: hidden;
         overflow-y: auto;
     }
+    .state { width: 40%; text-wrap: wrap; }
 	/*video {
         width: 100%;
     }
@@ -53,6 +54,7 @@
     <span id="estimated-clock-drift"></span><br/>
 
     <h2>State</h2>
+    <div id="stat">
     <p>
         Generation state: <span id="generation-state"></span>
     </p>
@@ -65,6 +67,7 @@
     <p>
         Signaling state: <span id="signaling-state"></span>
     </p>
+    </div>
 
     <div id="media" style="display: none">
         <h2>Media</h2>

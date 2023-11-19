@@ -80,7 +80,7 @@ function sendPrompt() {
     const trySend = () => {
       if (dataChannel && dataChannelOpen) {
         dataChannelLog.textContent += "> " + prompt + "\n";
-        generation_elapsed = make_elapsed()
+        generation_elapsed = make_elapsed(true)
         generationStatusLog.textContent = "sent"
         dataChannel.send(prompt);
         sending = false;
@@ -106,11 +106,11 @@ function timeStamp() {
     return Date.now() - timeStart;
   }
 }
-function make_elapsed() {
+function make_elapsed(precis=false) {
   let last = Date.now();
   return (set_to = null) => {
     const now = set_to == null ? Date.now() : set_to;
-    const elapsed = `${Math.round((now - last) / 100) / 10}s`;
+    const elapsed = precis ? `${Math.round(now - last)}ms` : `${Math.round((now - last) / 100) / 10}s`
     last = now;
     return elapsed;
   };
@@ -122,7 +122,7 @@ async function createPeerConnection() {
     sdpSemantics: "unified-plan",
   };
 
-  gather_elapsed = make_elapsed();
+  gather_elapsed = make_elapsed(precis=true);
   connection_elapsed = make_elapsed();
   signaling_elapsed = make_elapsed();
 
@@ -286,10 +286,10 @@ async function start() {
   dataChannel.onmessage = (evt) => {
     dataChannelLog.textContent += `< ${evt.data}\n`;
     if (evt.data.startsWith("pong")) {
-      let [our_time, their_time] = evt.data.slice(5).split
+      let [our_time, their_time] = evt.data.slice(5).split(" ", 2)
       const elapsedMs = timeStamp() - parseInt(our_time, 10);
       const estimated_server_time = parseInt(their_time, 10) + elapsedMs / 2;
-      estimatedClockDriftField = `estimated clock drift from server: ${Math.round(Date.now() - estimated_server_time)}ms`
+      estimatedClockDriftField.textContent = `estimated clock drift from server: ${Math.round(Date.now() - estimated_server_time)}ms`
       dataChannelLog.textContent += ` RTT ${elapsedMs} ms\n`;
       rtcPingField.textContent = `webRTC roundtrip ping: ${elapsedMs}ms`;
     } else {
