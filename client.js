@@ -18,8 +18,11 @@ const seedInput = document.getElementById("seed");
 const latencyField = document.getElementById("latency");
 const genTimeField = document.getElementById("gen-time");
 const rtcPingField = document.getElementById("rtc-ping");
-const estimatedClockDriftField = document.getElementById("estimated-clock-drift");
+const estimatedClockDriftField = document.getElementById(
+  "estimated-clock-drift",
+);
 const generationStatusLog = document.getElementById("generation-state");
+
 const dataChannelLog = document.getElementById("data-channel");
 const iceConnectionLog = document.getElementById("ice-connection-state");
 const iceGatheringLog = document.getElementById("ice-gathering-state");
@@ -27,23 +30,36 @@ const signalingLog = document.getElementById("signaling-state");
 
 // Utility function to wait for a specified amount of time
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-let generation_elapsed = null
+let generation_elapsed = null;
+let last_prompt_data;
+
+async function waitForPrompt(getter) {
+  while (true) {
+    let prompt = getter();
+    let prompt_data = JSON.stringify(prompt);
+    if (prompt_data && prompt_data !== last_prompt_data) {
+      last_prompt_data = prompt_data;
+      console.time("generation");
+      return prompt;
+    }
+
+    await wait(100);
+  }
+}
 
 // Function to get prompt data
 async function getPrompt() {
-  while (true) {
-    if (promptInput && promptInput.value) {
-      const newPrompt = promptInput.value;
-      const newSeed = seedInput.value;
-      if (newPrompt !== lastPrompt || newSeed !== lastSeed) {
-        lastPrompt = newPrompt;
-        lastSeed = newSeed;
-        console.time("generation");
-        return { prompt: newPrompt, seed: newSeed, height: 512, width: 512};
-      }
+  return await waitForPrompt(() => {
+    if (!(promptInput && promptInput.value)) {
+      return null;
     }
-    await wait(100);
-  }
+    return {
+      prompt: promptInput.value,
+      seed: seedInput.value,
+      height: 512,
+      width: 512,
+    };
+  });
 }
 
 // Function to handle incoming image data
@@ -55,9 +71,13 @@ function handleImage(data) {
     Date.now() - parsed.id,
   )}ms`;
   genTimeField.textContent = `server generation time: ${parsed.gen_time}ms`;
-  generationStatusLog.textContent += ` -(${generation_elapsed(parsed.start)})-> server_start`
-  generationStatusLog.textContent += ` -(${generation_elapsed(parsed.end)})-> server_end`
-  generationStatusLog.textContent += ` -(${generation_elapsed()})-> received`
+  generationStatusLog.textContent += ` -(${generation_elapsed(
+    parsed.start,
+  )})-> server_start`;
+  generationStatusLog.textContent += ` -(${generation_elapsed(
+    parsed.end,
+  )})-> server_end`;
+  generationStatusLog.textContent += ` -(${generation_elapsed()})-> received`;
   const topImage = document.getElementById("imoge");
   const bottomImage = document.getElementById("imoge2");
   const newOpacity = topImage.style.opacity === "1" ? "0" : "1";
@@ -78,9 +98,9 @@ function sendPrompt() {
     const trySend = () => {
       if (dataChannel && dataChannelOpen) {
         dataChannelLog.textContent += "> " + prompt + "\n";
-        generation_elapsed = make_elapsed(true)
-        prompt.id = Date.now()
-        generationStatusLog.textContent = "sent"
+        generation_elapsed = make_elapsed(true);
+        prompt.id = Date.now();
+        generationStatusLog.textContent = "sent";
         dataChannel.send(JSON.stringify(prompt));
         clearInterval(interval);
       } else {
@@ -101,11 +121,13 @@ function timeStamp() {
     return Date.now() - timeStart;
   }
 }
-function make_elapsed(precis=false) {
+function make_elapsed(precis = false) {
   let last = Date.now();
   return (set_to = null) => {
     const now = set_to == null ? Date.now() : set_to;
-    const elapsed = precis ? `${Math.round(now - last)}ms` : `${Math.round((now - last) / 100) / 10}s`
+    const elapsed = precis
+      ? `${Math.round(now - last)}ms`
+      : `${Math.round((now - last) / 100) / 10}s`;
     last = now;
     return elapsed;
   };
@@ -117,33 +139,33 @@ async function createPeerConnection() {
     sdpSemantics: "unified-plan",
   };
 
-  gather_elapsed = make_elapsed(precis=true);
+  gather_elapsed = make_elapsed((precis = true));
   connection_elapsed = make_elapsed();
   signaling_elapsed = make_elapsed();
 
   if (document.getElementById("use-stun").checked) {
     config.iceServers = [
       { urls: "stun:stun.relay.metered.ca:80" },
-      // {
-      //   urls: "turn:a.relay.metered.ca:80",
-      //   username: "d0d9c8df0b9e209b5f81f70d",
-      //   credential: "32ANR/GokUdBpWrp",
-      // },
-      // {
-      //   urls: "turn:a.relay.metered.ca:443",
-      //   username: "d0d9c8df0b9e209b5f81f70d",
-      //   credential: "32ANR/GokUdBpWrp",
-      // },
       {
-        urls: "turn:a.relay.metered.ca:80?transport=tcp",
+        urls: "turn:a.relay.metered.ca:80",
         username: "d0d9c8df0b9e209b5f81f70d",
         credential: "32ANR/GokUdBpWrp",
       },
       {
-        urls: "turn:a.relay.metered.ca:443?transport=tcp",
+        urls: "turn:a.relay.metered.ca:443",
         username: "d0d9c8df0b9e209b5f81f70d",
         credential: "32ANR/GokUdBpWrp",
       },
+      // {
+      //   urls: "turn:a.relay.metered.ca:80?transport=tcp",
+      //   username: "d0d9c8df0b9e209b5f81f70d",
+      //   credential: "32ANR/GokUdBpWrp",
+      // },
+      // {
+      //   urls: "turn:a.relay.metered.ca:443?transport=tcp",
+      //   username: "d0d9c8df0b9e209b5f81f70d",
+      //   credential: "32ANR/GokUdBpWrp",
+      // },
       // {
       //   urls: "turn:216.153.63.64:3478?transport=tcp",
       //   credential: "fakecred",
@@ -281,10 +303,12 @@ async function start() {
   dataChannel.onmessage = (evt) => {
     dataChannelLog.textContent += `< ${evt.data}\n`;
     if (evt.data.startsWith("pong")) {
-      let [our_time, their_time] = evt.data.slice(5).split(" ", 2)
+      let [our_time, their_time] = evt.data.slice(5).split(" ", 2);
       const elapsedMs = timeStamp() - parseInt(our_time, 10);
       const estimated_server_time = parseInt(their_time, 10) + elapsedMs / 2;
-      estimatedClockDriftField.textContent = `estimated clock drift from server: ${Math.round(Date.now() - estimated_server_time)}ms`
+      estimatedClockDriftField.textContent = `estimated clock drift from server: ${Math.round(
+        Date.now() - estimated_server_time,
+      )}ms`;
       dataChannelLog.textContent += ` RTT ${elapsedMs} ms\n`;
       rtcPingField.textContent = `webRTC roundtrip ping: ${elapsedMs}ms`;
     } else {
