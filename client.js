@@ -37,7 +37,7 @@ async function waitForPrompt(getter) {
   while (true) {
     let prompt = getter();
     let prompt_data = JSON.stringify(prompt);
-    if (prompt_data && prompt_data !== last_prompt_data) {
+    if (prompt && prompt_data !== last_prompt_data) {
       last_prompt_data = prompt_data;
       console.time("generation");
       return prompt;
